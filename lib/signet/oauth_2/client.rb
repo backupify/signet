@@ -846,6 +846,83 @@ module Signet
           return response
         end
       end
+
+      ##
+      # Transmits a request for a protected resource.
+      #
+      # @param [Hash] options
+      #   The configuration parameters for the request.
+      #   - <code>:request</code> —
+      #     A pre-constructed request.  An OAuth 2 Authorization header
+      #     will be added to it, as well as an explicit Cache-Control
+      #     `no-store` directive.
+      #   - <code>:method</code> —
+      #     The HTTP method for the request.  Defaults to 'GET'.
+      #   - <code>:uri</code> —
+      #     The URI for the request.
+      #   - <code>:headers</code> —
+      #     The HTTP headers for the request.
+      #   - <code>:body</code> —
+      #     The HTTP body for the request.
+      #   - <code>:realm</code> —
+      #     The Authorization realm.  See RFC 2617.
+      #   - <code>:adapter</code> —
+      #     The HTTP adapter.
+      #     Defaults to <code>HTTPAdapter::NetHTTPAdapter.new</code>.
+      #   - <code>:connection</code> —
+      #     An open, manually managed HTTP connection.
+      #     Must be of type <code>HTTPAdapter::Connection</code> and the
+      #     internal connection representation must match the HTTP adapter
+      #     being used.
+      #
+      # @example
+      #   # Using Net::HTTP
+      #   response = client.fetch_protected_resource(
+      #     :uri => 'http://www.example.com/protected/resource'
+      #   )
+      #   status, headers, body = response
+      #
+      # @example
+      #   # Using Typhoeus
+      #   response = client.fetch_protected_resource(
+      #     :request => Typhoeus::Request.new(
+      #       'http://www.example.com/protected/resource'
+      #     ),
+      #     :adapter => HTTPAdapter::TyphoeusAdapter.new,
+      #     :connection => connection
+      #   )
+      #   status, headers, body = response
+      #
+      # @return [Array] The response object.
+      def stream_protected_resource(options={})
+        adapter = options[:adapter]
+        unless adapter
+          require 'httpadapter'
+          require 'httpadapter/adapters/net_http'
+          adapter = HTTPAdapter::NetHTTPAdapter.new
+        end
+        connection = options[:connection]
+        request = self.generate_authenticated_request(options)
+        response = adapter.transmit(request, connection)
+        status = response.code
+
+        if status.to_i == 401
+          # When accessing a protected resource, we only want to raise an
+          # error for 401 responses.
+          message = 'Authorization failed.'
+          if body.strip.length > 0
+            message += "  Server message:\n#{body.strip}"
+          end
+          raise ::Signet::AuthorizationError.new(
+            message, :request => request, :response => response
+          )
+        else
+          response.read_body do |segment|
+            yield segment
+          end
+        end
+      end
+
     end
   end
 end
